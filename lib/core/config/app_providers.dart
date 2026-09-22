@@ -20,8 +20,10 @@ final crowdBeatsApiProvider = Provider<CrowdBeatsApi>((ref) {
   return CrowdBeatsApi(ref.watch(apiClientProvider));
 });
 
-final webSocketServiceProvider = Provider<WebSocketService>((ref) {
-  final service = WebSocketService(baseUrl: AppConfig.wsBaseUrl);
-  ref.onDispose(service.dispose);
-  return service;
+final webSocketServiceProvider = Provider<WebSocketTransport>((ref) {
+  return WebSocketService(baseUrl: AppConfig.wsBaseUrl);
+});
+
+final roomReconnectDelayProvider = Provider<Duration Function(int)>((ref) {
+  return (attempt) => Duration(seconds: 1 << (attempt - 1).clamp(0, 3).toInt());
 });

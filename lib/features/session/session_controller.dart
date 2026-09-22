@@ -301,6 +301,11 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  Future<void> invalidateFromServer({required String token}) async {
+    if (state.active?.token != token || state.busy) return;
+    await _clearInvalidSession();
+  }
+
   Future<void> _clearInvalidSession({bool expired = true}) async {
     _stopHeartbeat();
     try {

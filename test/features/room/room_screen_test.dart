@@ -2,7 +2,7 @@ import 'package:crowd_beats_front/core/api/api_client.dart';
 import 'package:crowd_beats_front/core/api/crowd_beats_api.dart';
 import 'package:crowd_beats_front/core/config/app_providers.dart';
 import 'package:crowd_beats_front/core/storage/session_storage.dart';
-import 'package:crowd_beats_front/features/room/room_data.dart';
+import 'package:crowd_beats_front/features/room/room_controller.dart';
 import 'package:crowd_beats_front/features/room/room_screen.dart';
 import 'package:crowd_beats_front/features/session/join_screen.dart';
 import 'package:crowd_beats_front/features/session/session_controller.dart';
@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import '../../fixtures.dart';
+import '../../websocket_fakes.dart';
 
 const roomAId = '11111111-1111-4111-8111-111111111111';
 const roomBId = '22222222-2222-4222-8222-222222222222';
@@ -35,7 +36,8 @@ class MemorySessionStorage extends SessionStorage {
 
 class RoomHarness {
   RoomHarness(Future<http.Response> Function(http.Request) handler)
-    : storage = MemorySessionStorage('token-a') {
+    : storage = MemorySessionStorage('token-a'),
+      sockets = FakeWebSocketTransport() {
     client = ApiClient(
       baseUrl: 'http://localhost:8080',
       httpClient: MockClient(handler),
@@ -44,11 +46,13 @@ class RoomHarness {
       overrides: [
         sessionStorageProvider.overrideWithValue(storage),
         crowdBeatsApiProvider.overrideWithValue(CrowdBeatsApi(client)),
+        webSocketServiceProvider.overrideWithValue(sockets),
       ],
     );
   }
 
   final MemorySessionStorage storage;
+  final FakeWebSocketTransport sockets;
   late final ApiClient client;
   late final ProviderContainer container;
 
@@ -161,8 +165,12 @@ void main() {
       tester.getTopLeft(find.text('First Track')).dy,
       lessThan(tester.getTopLeft(find.text('Second Track')).dy),
     );
-    final loaded = harness.container.read(roomDataProvider(roomAId)).value!;
-    expect(loaded.queue.items.map((item) => item.track.title), [
+    final loaded = harness.container.read(
+      roomControllerProvider(
+        const RoomSessionKey(roomId: roomAId, token: 'token-a'),
+      ),
+    );
+    expect(loaded.queue!.items.map((item) => item.track.title), [
       'First Track',
       'Second Track',
     ]);

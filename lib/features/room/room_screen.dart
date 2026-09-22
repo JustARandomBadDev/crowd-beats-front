@@ -5,7 +5,7 @@ import '../../core/api/api_failure.dart';
 import '../../models/queue.dart';
 import '../../models/track.dart';
 import '../session/session_controller.dart';
-import 'room_data.dart';
+import 'room_controller.dart';
 
 class RoomScreen extends ConsumerWidget {
   const RoomScreen({super.key});
@@ -14,92 +14,155 @@ class RoomScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final sessionState = ref.watch(sessionControllerProvider);
     final active = sessionState.active!;
-    final roomData = ref.watch(roomDataProvider(active.roomId));
+    final roomKey = RoomSessionKey(roomId: active.roomId, token: active.token);
+    final roomState = ref.watch(roomControllerProvider(roomKey));
+    final roomController = ref.read(roomControllerProvider(roomKey).notifier);
     final sessionController = ref.read(sessionControllerProvider.notifier);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          roomData.value?.room.name ?? active.roomName ?? 'Crowd Beats',
-        ),
+        title: Text(roomState.room?.name ?? active.roomName ?? 'Crowd Beats'),
         actions: [
           IconButton(
             tooltip: 'Scan another room',
             onPressed: sessionState.busy
                 ? null
-                : sessionController.startRoomSwitch,
+                : () async {
+                    await roomController.stop();
+                    if (context.mounted) sessionController.startRoomSwitch();
+                  },
             icon: const Icon(Icons.qr_code_scanner),
           ),
           TextButton(
-            onPressed: sessionState.busy ? null : sessionController.leave,
+            onPressed: sessionState.busy
+                ? null
+                : () async {
+                    await roomController.stop();
+                    await sessionController.leave();
+                    if (context.mounted &&
+                        ref.read(sessionControllerProvider).active?.token ==
+                            active.token) {
+                      roomController.resume();
+                    }
+                  },
             child: const Text('Leave'),
           ),
         ],
       ),
-      body: roomData.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => _LoadError(
-          message: roomLoadErrorMessage(error),
-          onRetry: () => ref.invalidate(roomDataProvider(active.roomId)),
-        ),
-        data: (data) => RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(roomDataProvider(active.roomId));
-            try {
-              await ref.read(roomDataProvider(active.roomId).future);
-            } on Object {
-              // The provider exposes the failure through the Room error state.
-            }
-          },
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                data.room.name,
-                style: Theme.of(context).textTheme.headlineMedium,
+      body: !roomState.hasData
+          ? roomState.initialLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _LoadError(
+                    message: roomLoadErrorMessage(roomState.initialError),
+                    onRetry: roomController.loadInitial,
+                  )
+          : RefreshIndicator(
+              onRefresh: () async {
+                await roomController.refresh();
+              },
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    roomState.room!.name,
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text('Signed in as ${active.nickname}'),
+                  if (_liveStatusMessage(roomState) case final message?) ...[
+                    const SizedBox(height: 12),
+                    _LiveStatus(
+                      message: message,
+                      syncing: roomState.synchronizing,
+                    ),
+                  ],
+                  if (sessionState.message != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      sessionState.message!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+                  if (roomState.queue!.nowPlaying case final nowPlaying?) ...[
+                    const SizedBox(height: 24),
+                    Text(
+                      'Now playing',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    _NowPlayingCard(nowPlaying: nowPlaying),
+                  ],
+                  const SizedBox(height: 24),
+                  Text(
+                    'Up next',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  if (roomState.queue!.items.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 32),
+                      child: Text(
+                        'The queue is empty.',
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  else
+                    for (final item in roomState.queue!.items)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _QueueItemCard(item: item),
+                      ),
+                ],
               ),
-              const SizedBox(height: 4),
-              Text('Signed in as ${active.nickname}'),
-              if (sessionState.message != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  sessionState.message!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ],
-              if (data.queue.nowPlaying case final nowPlaying?) ...[
-                const SizedBox(height: 24),
-                Text(
-                  'Now playing',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                _NowPlayingCard(nowPlaying: nowPlaying),
-              ],
-              const SizedBox(height: 24),
-              Text('Up next', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              if (data.queue.items.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: Text(
-                    'The queue is empty.',
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              else
-                for (final item in data.queue.items)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _QueueItemCard(item: item),
-                  ),
+            ),
+    );
+  }
+}
+
+class _LiveStatus extends StatelessWidget {
+  const _LiveStatus({required this.message, required this.syncing});
+
+  final String message;
+  final bool syncing;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            if (syncing) ...[
+              const SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
             ],
-          ),
+            Expanded(child: Text(message)),
+          ],
         ),
       ),
     );
   }
+}
+
+String? _liveStatusMessage(RoomState state) {
+  if (state.liveMessage != null) return state.liveMessage;
+  if (state.synchronizing) return 'Synchronizing live queue…';
+  return switch (state.connectionStatus) {
+    LiveConnectionStatus.connecting => 'Connecting live updates…',
+    LiveConnectionStatus.reconnecting =>
+      'Live updates unavailable. Reconnecting…',
+    LiveConnectionStatus.connected || LiveConnectionStatus.stopped => null,
+  };
 }
 
 class _LoadError extends StatelessWidget {
@@ -261,7 +324,7 @@ class _Artwork extends StatelessWidget {
 
 String _voteLabel(int count) => count == 1 ? '1 vote' : '$count votes';
 
-String roomLoadErrorMessage(Object error) {
+String roomLoadErrorMessage(Object? error) {
   if (error is! ApiFailure) {
     return 'Could not load this room. Please retry.';
   }
