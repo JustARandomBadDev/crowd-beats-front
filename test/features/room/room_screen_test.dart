@@ -4,6 +4,7 @@ import 'package:crowd_beats_front/core/config/app_providers.dart';
 import 'package:crowd_beats_front/core/storage/session_storage.dart';
 import 'package:crowd_beats_front/features/room/room_controller.dart';
 import 'package:crowd_beats_front/features/room/room_screen.dart';
+import 'package:crowd_beats_front/features/search/track_search_screen.dart';
 import 'package:crowd_beats_front/features/session/join_screen.dart';
 import 'package:crowd_beats_front/features/session/session_controller.dart';
 import 'package:crowd_beats_front/main.dart';
@@ -55,11 +56,14 @@ class RoomHarness {
   final FakeWebSocketTransport sockets;
   late final ApiClient client;
   late final ProviderContainer container;
+  var _disposed = false;
 
   Future<void> bootstrap() =>
       container.read(sessionControllerProvider.notifier).bootstrap();
 
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     container.dispose();
     client.close();
   }
@@ -122,6 +126,11 @@ Widget appFor(RoomHarness harness, Widget home) => UncontrolledProviderScope(
   child: MaterialApp(home: home),
 );
 
+Future<void> disposeHarness(WidgetTester tester, RoomHarness harness) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  harness.dispose();
+}
+
 void main() {
   testWidgets('loads room, now playing and queued tracks in backend order', (
     tester,
@@ -174,6 +183,7 @@ void main() {
       'First Track',
       'Second Track',
     ]);
+    await disposeHarness(tester, harness);
   });
 
   testWidgets('empty queue is a valid Room state', (tester) async {
@@ -198,6 +208,11 @@ void main() {
     expect(find.text('Empty Room'), findsWidgets);
     expect(find.text('The queue is empty.'), findsOneWidget);
     expect(find.text('Retry'), findsNothing);
+
+    await tester.tap(find.text('Search music'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TrackSearchScreen), findsOneWidget);
+    await disposeHarness(tester, harness);
   });
 
   testWidgets('load failure exposes retry and retry can recover', (
@@ -235,6 +250,7 @@ void main() {
     expect(queueRequests, 2);
     expect(find.text('Recovered Track'), findsOneWidget);
     expect(find.text('Retry'), findsNothing);
+    await disposeHarness(tester, harness);
   });
 
   testWidgets('successful room switch loads B without retaining A data', (
@@ -274,6 +290,7 @@ void main() {
     expect(find.text('Room B'), findsWidgets);
     expect(find.text('Room B Track'), findsOneWidget);
     expect(find.text('Room A Track'), findsNothing);
+    await disposeHarness(tester, harness);
   });
 
   testWidgets('leave removes Room data and returns to Join', (tester) async {
@@ -301,11 +318,22 @@ void main() {
     expect(find.text('Room A Track'), findsOneWidget);
 
     await tester.tap(find.text('Leave'));
+    await tester.pump();
+    await tester.runAsync(() async {
+      for (
+        var index = 0;
+        index < 10 && harness.storage.token != null;
+        index++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+    });
     await tester.pumpAndSettle();
 
     expect(find.byType(RoomScreen), findsNothing);
     expect(find.byType(JoinScreen), findsOneWidget);
     expect(find.text('Room A Track'), findsNothing);
     expect(harness.storage.token, isNull);
+    await disposeHarness(tester, harness);
   });
 }

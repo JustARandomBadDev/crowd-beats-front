@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_failure.dart';
 import '../../models/queue.dart';
 import '../../models/track.dart';
+import '../search/track_search_controller.dart';
+import '../search/track_search_screen.dart';
 import '../session/session_controller.dart';
 import 'room_controller.dart';
 
@@ -118,6 +120,22 @@ class RoomScreen extends ConsumerWidget {
                 ],
               ),
             ),
+      floatingActionButton: roomState.hasData
+          ? FloatingActionButton.extended(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => TrackSearchScreen(
+                    session: TrackSearchSession(
+                      roomId: active.roomId,
+                      token: active.token,
+                    ),
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.search),
+              label: const Text('Search music'),
+            )
+          : null,
     );
   }
 }
