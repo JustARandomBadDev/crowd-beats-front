@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/config/app_config.dart';
+import 'features/room/room_screen.dart';
 import 'features/session/join_screen.dart';
-import 'features/session/room_screen.dart';
 import 'features/session/session_controller.dart';
 
 void main() {
