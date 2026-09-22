@@ -2,7 +2,7 @@
 
 Frontend mobile Flutter pour Crowd Beats, app mobile type Crowd DJ.
 
-Ce dépôt contient uniquement le socle de développement frontend : bootstrap Flutter, configuration locale, clients API/WebSocket et stockage de token. Les modèles et parcours métier restent à implémenter selon le contrat figé du backend.
+Ce dépôt contient le socle de développement frontend : bootstrap Flutter, DTOs REST, service API typé, configuration locale, WebSocket minimal et stockage de token. Les parcours métier restent à implémenter selon le contrat figé du backend.
 
 ## Installation
 
@@ -46,6 +46,8 @@ WS_BASE_URL=ws://localhost:8080/ws
 
 Elles sont définies dans `lib/core/config/app_config.dart` et peuvent être surchargées au lancement avec `--dart-define`.
 
+Les URL doivent avoir un schéma et un hôte valides. Les chemins REST `/api/v1/...` sont ajoutés par le client. Sur Android, le HTTP local est autorisé uniquement dans le build debug ; sur iOS, l'exception ATS ne concerne que le réseau local. Pour un appareil physique, fournir l'adresse LAN de la machine backend via `--dart-define`. Ne pas utiliser `localhost` sur l'appareil pour atteindre le PC.
+
 Le backend local attendu :
 
 ```txt
@@ -53,7 +55,7 @@ API: http://localhost:8080
 WebSocket: ws://localhost:8080/ws?room_id=<room_uuid>
 ```
 
-Headers utilisés :
+Headers utilisés (`Authorization` uniquement pour les routes protégées) :
 
 ```txt
 Content-Type: application/json
@@ -90,6 +92,7 @@ lib/
 - Le contrat public backend est figé : les réponses REST utilisent l'enveloppe `data/error/meta` et des clés `snake_case`. Voir `../crowd-beats-api/docs/api.md`.
 - Le join se fait par `POST /api/v1/rooms/join-by-qr` avec `qr_code` et `nickname`. La réponse contient `session.token` et `ws.url` (chemin relatif) ; le QR transmet un code, pas une image ou une URL renvoyée par l'API.
 - Le WebSocket utilise `Authorization: Bearer <session_token>` et `room_id`. Après `sync_required`, charger `GET /api/v1/rooms/{roomID}/queue` ; `queue_updated` contient un snapshot complet. Voir `../crowd-beats-api/docs/websocket.md`.
-- La restauration complète de session, la synchronisation de queue et les modèles contractuels restent à implémenter.
+- Les DTOs REST et les routes mobiles figées sont définis dans `lib/models/` et `lib/core/api/` ; aucune requête métier n'est encore déclenchée par l'interface.
+- La restauration complète de session et la synchronisation de queue restent à implémenter.
 - Le MVP est en construction.
 - Aucun écran métier complet n'est implémenté dans ce socle.

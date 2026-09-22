@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
+import '../api/crowd_beats_api.dart';
 import '../storage/session_storage.dart';
 import '../websocket/websocket_service.dart';
 import 'app_config.dart';
@@ -10,12 +11,13 @@ final sessionStorageProvider = Provider<SessionStorage>((ref) {
 });
 
 final apiClientProvider = Provider<ApiClient>((ref) {
-  final sessionStorage = ref.watch(sessionStorageProvider);
+  final client = ApiClient(baseUrl: AppConfig.apiBaseUrl);
+  ref.onDispose(client.close);
+  return client;
+});
 
-  return ApiClient(
-    baseUrl: AppConfig.apiBaseUrl,
-    tokenProvider: sessionStorage.readToken,
-  );
+final crowdBeatsApiProvider = Provider<CrowdBeatsApi>((ref) {
+  return CrowdBeatsApi(ref.watch(apiClientProvider));
 });
 
 final webSocketServiceProvider = Provider<WebSocketService>((ref) {

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'core/api/api_client.dart';
+import 'core/api/api_failure.dart';
 import 'core/config/app_config.dart';
 import 'core/config/app_providers.dart';
 
 void main() {
+  AppConfig.validate();
   runApp(const ProviderScope(child: CrowdBeatsApp()));
 }
 
@@ -39,17 +40,18 @@ class _AppReadyScreenState extends ConsumerState<AppReadyScreen> {
     setState(() => _apiStatus = 'Testing API...');
 
     try {
-      final response = await ref
-          .read(apiClientProvider)
-          .get<Object?>('/health/ready');
-      setState(() => _apiStatus = 'API reachable: ${response.raw ?? 'ok'}');
-    } on ApiException catch (error) {
+      final response = await ref.read(crowdBeatsApiProvider).readiness();
+      if (!mounted) return;
+      setState(() => _apiStatus = 'API reachable: ${response.data.status}');
+    } on ApiFailure catch (error) {
+      if (!mounted) return;
       setState(() {
         _apiStatus =
-            'API responded with ${error.statusCode}: '
-            '${error.message ?? 'no details'}';
+            'API ${error.category.name}: ${error.statusCode ?? 'no status'} '
+            '${error.backendCode ?? ''}';
       });
     } on Object catch (error) {
+      if (!mounted) return;
       setState(() => _apiStatus = 'API unavailable: $error');
     }
   }
