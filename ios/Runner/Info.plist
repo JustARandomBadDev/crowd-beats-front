@@ -6,6 +6,8 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan a venue QR code to join its room.</string>
 	<key>CFBundleDisplayName</key>
 	<string>Crowd Beats Front</string>
 	<key>CFBundleExecutable</key>

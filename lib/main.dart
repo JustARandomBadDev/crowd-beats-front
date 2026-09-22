@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'core/api/api_failure.dart';
 import 'core/config/app_config.dart';
-import 'core/config/app_providers.dart';
+import 'features/session/join_screen.dart';
+import 'features/session/room_screen.dart';
+import 'features/session/session_controller.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   AppConfig.validate();
   runApp(const ProviderScope(child: CrowdBeatsApp()));
 }
@@ -21,78 +23,71 @@ class CrowdBeatsApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
       ),
-      home: const AppReadyScreen(),
+      home: const SessionGateway(),
     );
   }
 }
 
-class AppReadyScreen extends ConsumerStatefulWidget {
-  const AppReadyScreen({super.key});
+class SessionGateway extends ConsumerStatefulWidget {
+  const SessionGateway({super.key});
 
   @override
-  ConsumerState<AppReadyScreen> createState() => _AppReadyScreenState();
+  ConsumerState<SessionGateway> createState() => _SessionGatewayState();
 }
 
-class _AppReadyScreenState extends ConsumerState<AppReadyScreen> {
-  String? _apiStatus;
-
-  Future<void> _testApi() async {
-    setState(() => _apiStatus = 'Testing API...');
-
-    try {
-      final response = await ref.read(crowdBeatsApiProvider).readiness();
-      if (!mounted) return;
-      setState(() => _apiStatus = 'API reachable: ${response.data.status}');
-    } on ApiFailure catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _apiStatus =
-            'API ${error.category.name}: ${error.statusCode ?? 'no status'} '
-            '${error.backendCode ?? ''}';
-      });
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() => _apiStatus = 'API unavailable: $error');
-    }
+class _SessionGatewayState extends ConsumerState<SessionGateway> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() {
+      if (mounted) ref.read(sessionControllerProvider.notifier).bootstrap();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Crowd Beats')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+    final session = ref.watch(sessionControllerProvider);
+    if (session.phase == SessionPhase.checking) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (session.phase == SessionPhase.error) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Crowd Beats')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'App ready',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
+                Text(session.message ?? 'Could not restore the session.'),
                 const SizedBox(height: 16),
-                Text(
-                  'API: ${AppConfig.apiBaseUrl}\nWS: ${AppConfig.wsBaseUrl}',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: _testApi,
-                  child: const Text('Test API'),
-                ),
-                if (_apiStatus != null) ...[
-                  const SizedBox(height: 16),
-                  Text(_apiStatus!, textAlign: TextAlign.center),
-                ],
+                if (session.pendingJoin != null)
+                  FilledButton(
+                    onPressed: session.busy
+                        ? null
+                        : () => ref
+                              .read(sessionControllerProvider.notifier)
+                              .retrySave(),
+                    child: const Text('Retry saving session'),
+                  )
+                else
+                  FilledButton(
+                    onPressed: session.busy
+                        ? null
+                        : () => ref
+                              .read(sessionControllerProvider.notifier)
+                              .bootstrap(),
+                    child: const Text('Retry'),
+                  ),
               ],
             ),
           ),
         ),
-      ),
-    );
+      );
+    }
+    if (session.phase == SessionPhase.active && !session.switching) {
+      return const RoomScreen();
+    }
+    return const JoinScreen();
   }
 }
