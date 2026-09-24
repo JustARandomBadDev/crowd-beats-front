@@ -155,6 +155,13 @@ void main() {
           return apiResponse(room(roomAId, 'Room A'));
         case '/api/v1/rooms/$roomAId/queue':
           return apiResponse(snapshot);
+        case '/api/v1/rooms/$roomAId/votes':
+          return apiResponse({
+            'vote_added': true,
+            'room_track_id': 'queued-first',
+            'current_vote_count': 6,
+            'votes_remaining': 4,
+          });
         default:
           throw StateError('Unexpected request ${request.url.path}');
       }
@@ -170,6 +177,9 @@ void main() {
     expect(find.text('Currently Playing'), findsOneWidget);
     expect(find.text('First Track'), findsOneWidget);
     expect(find.text('Second Track'), findsOneWidget);
+    expect(find.byTooltip('Vote for Currently Playing'), findsOneWidget);
+    expect(find.byTooltip('Vote for First Track'), findsOneWidget);
+    expect(find.byTooltip('Vote for Second Track'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('First Track')).dy,
       lessThan(tester.getTopLeft(find.text('Second Track')).dy),
@@ -183,6 +193,12 @@ void main() {
       'First Track',
       'Second Track',
     ]);
+
+    await tester.tap(find.byTooltip('Vote for First Track'));
+    await tester.pumpAndSettle();
+    expect(find.text('Vote counted. 4 votes remaining.'), findsOneWidget);
+    expect(find.text('4 personal votes remaining'), findsOneWidget);
+    expect(find.textContaining('5 votes'), findsOneWidget);
     await disposeHarness(tester, harness);
   });
 

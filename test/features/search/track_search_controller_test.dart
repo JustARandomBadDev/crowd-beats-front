@@ -7,8 +7,11 @@ import 'package:crowd_beats_front/core/config/app_providers.dart';
 import 'package:crowd_beats_front/core/storage/session_storage.dart';
 import 'package:crowd_beats_front/features/room/room_controller.dart';
 import 'package:crowd_beats_front/features/search/track_search_controller.dart';
+import 'package:crowd_beats_front/features/search/track_search_screen.dart';
 import 'package:crowd_beats_front/features/session/session_controller.dart';
+import 'package:crowd_beats_front/features/vote/vote_controller.dart';
 import 'package:crowd_beats_front/models/track.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -22,6 +25,7 @@ const roomBId = '22222222-2222-4222-8222-222222222222';
 const trackAId = 'AAAAAAAAAAAAAAAAAAAAAA';
 const trackBId = 'BBBBBBBBBBBBBBBBBBBBBB';
 const sessionA = TrackSearchSession(roomId: roomAId, token: 'token-a');
+const voteRoomAKey = RoomSessionKey(roomId: roomAId, token: 'token-a');
 
 class MemoryStorage extends SessionStorage {
   MemoryStorage(this.token);
@@ -59,11 +63,14 @@ class SearchHarness {
   final FakeWebSocketTransport sockets;
   late final ApiClient client;
   late final ProviderContainer container;
+  var _disposed = false;
 
   Future<void> bootstrap() =>
       container.read(sessionControllerProvider.notifier).bootstrap();
 
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     container.dispose();
     client.close();
   }
@@ -350,11 +357,66 @@ void main() {
       );
       expect(proposals, 1);
       expect(state.proposalPhase, ProposalPhase.duplicate);
-      expect(state.proposalMessage, contains('Vote'));
+      expect(state.proposalMessage, contains('already in the queue'));
       expect(state.proposal?.existingRoomTrack?.id, 'existing-room-track');
       expect(state.proposal?.existingRoomTrack?.position, 2);
     },
   );
+
+  testWidgets('duplicate proposal exposes the shared vote action', (
+    tester,
+  ) async {
+    var votes = 0;
+    final harness = SearchHarness((request) async {
+      if (request.url.path == '/api/v1/sessions/me') {
+        return currentSession(roomAId);
+      }
+      if (request.url.path == '/api/v1/rooms/$roomAId/tracks') {
+        return duplicateProposal();
+      }
+      if (request.url.path == '/api/v1/rooms/$roomAId/votes') {
+        votes++;
+        return apiResponse({
+          'vote_added': true,
+          'room_track_id': 'existing-room-track',
+          'current_vote_count': 4,
+          'votes_remaining': 3,
+        });
+      }
+      throw StateError('Unexpected request ${request.url.path}');
+    });
+    addTearDown(harness.dispose);
+    await harness.bootstrap();
+    final subscription = listenToSearch(harness);
+    await harness.container
+        .read(trackSearchControllerProvider(sessionA).notifier)
+        .propose(SpotifyTrackDto.fromJson(track(trackAId, 'Duplicate')));
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: harness.container,
+        child: const MaterialApp(home: TrackSearchScreen(session: sessionA)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Vote for the existing track'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Vote for this track'));
+    await tester.pumpAndSettle();
+
+    expect(votes, 1);
+    expect(find.text('Vote counted. 3 votes remaining.'), findsOneWidget);
+    final voteState = harness.container.read(
+      voteControllerProvider(voteRoomAKey),
+    );
+    expect(
+      voteState.actionFor('existing-room-track')?.response?.roomTrackId,
+      'existing-room-track',
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    subscription.close();
+    harness.dispose();
+  });
 
   test('queue full and transient proposal failure are retryable', () async {
     var proposals = 0;

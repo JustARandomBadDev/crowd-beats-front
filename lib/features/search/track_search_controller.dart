@@ -200,8 +200,7 @@ class TrackSearchController extends Notifier<TrackSearchState> {
         state = state.copyWith(
           proposalPhase: ProposalPhase.duplicate,
           proposingSpotifyTrackId: null,
-          proposalMessage:
-              'This track is already in the queue. Vote for it there instead.',
+          proposalMessage: 'This track is already in the queue.',
           proposalFailure: null,
           proposal: proposal,
         );

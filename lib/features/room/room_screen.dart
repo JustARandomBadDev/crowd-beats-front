@@ -7,6 +7,8 @@ import '../../models/track.dart';
 import '../search/track_search_controller.dart';
 import '../search/track_search_screen.dart';
 import '../session/session_controller.dart';
+import '../vote/vote_action.dart';
+import '../vote/vote_controller.dart';
 import 'room_controller.dart';
 
 class RoomScreen extends ConsumerWidget {
@@ -19,6 +21,8 @@ class RoomScreen extends ConsumerWidget {
     final roomKey = RoomSessionKey(roomId: active.roomId, token: active.token);
     final roomState = ref.watch(roomControllerProvider(roomKey));
     final roomController = ref.read(roomControllerProvider(roomKey).notifier);
+    final voteState = ref.watch(voteControllerProvider(roomKey));
+    final voteController = ref.read(voteControllerProvider(roomKey).notifier);
     final sessionController = ref.read(sessionControllerProvider.notifier);
 
     return Scaffold(
@@ -72,6 +76,14 @@ class RoomScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text('Signed in as ${active.nickname}'),
+                  if (voteState.votesRemaining case final remaining?) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      remaining == 1
+                          ? '1 personal vote remaining'
+                          : '$remaining personal votes remaining',
+                    ),
+                  ],
                   if (_liveStatusMessage(roomState) case final message?) ...[
                     const SizedBox(height: 12),
                     _LiveStatus(
@@ -95,7 +107,11 @@ class RoomScreen extends ConsumerWidget {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-                    _NowPlayingCard(nowPlaying: nowPlaying),
+                    _NowPlayingCard(
+                      nowPlaying: nowPlaying,
+                      voteAction: voteState.actionFor(nowPlaying.roomTrackId),
+                      onVote: () => voteController.vote(nowPlaying.roomTrackId),
+                    ),
                   ],
                   const SizedBox(height: 24),
                   Text(
@@ -115,7 +131,11 @@ class RoomScreen extends ConsumerWidget {
                     for (final item in roomState.queue!.items)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: _QueueItemCard(item: item),
+                        child: _QueueItemCard(
+                          item: item,
+                          voteAction: voteState.actionFor(item.roomTrackId),
+                          onVote: () => voteController.vote(item.roomTrackId),
+                        ),
                       ),
                 ],
               ),
@@ -208,9 +228,15 @@ class _LoadError extends StatelessWidget {
 }
 
 class _NowPlayingCard extends StatelessWidget {
-  const _NowPlayingCard({required this.nowPlaying});
+  const _NowPlayingCard({
+    required this.nowPlaying,
+    required this.voteAction,
+    required this.onVote,
+  });
 
   final NowPlayingDto nowPlaying;
+  final TrackVoteState? voteAction;
+  final VoidCallback onVote;
 
   @override
   Widget build(BuildContext context) {
@@ -218,17 +244,28 @@ class _NowPlayingCard extends StatelessWidget {
       color: Theme.of(context).colorScheme.primaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Artwork(track: nowPlaying.track),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _TrackDetails(
-                track: nowPlaying.track,
-                details: _voteLabel(nowPlaying.voteCount),
-                proposedBy: nowPlaying.proposedBy,
-              ),
+            Row(
+              children: [
+                _Artwork(track: nowPlaying.track),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TrackDetails(
+                    track: nowPlaying.track,
+                    details: _voteLabel(nowPlaying.voteCount),
+                    proposedBy: nowPlaying.proposedBy,
+                  ),
+                ),
+                VoteButton(
+                  trackTitle: nowPlaying.track.title,
+                  action: voteAction,
+                  onVote: onVote,
+                ),
+              ],
             ),
+            VoteFeedback(action: voteAction),
           ],
         ),
       ),
@@ -237,35 +274,53 @@ class _NowPlayingCard extends StatelessWidget {
 }
 
 class _QueueItemCard extends StatelessWidget {
-  const _QueueItemCard({required this.item});
+  const _QueueItemCard({
+    required this.item,
+    required this.voteAction,
+    required this.onVote,
+  });
 
   final QueueItemDto item;
+  final TrackVoteState? voteAction;
+  final VoidCallback onVote;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 32,
-              child: Text(
-                '${item.position}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+            Row(
+              children: [
+                SizedBox(
+                  width: 32,
+                  child: Text(
+                    '${item.position}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _Artwork(track: item.track),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TrackDetails(
+                    track: item.track,
+                    details:
+                        'Score ${item.score} · ${_voteLabel(item.voteCount)}',
+                    proposedBy: item.proposedBy,
+                  ),
+                ),
+                VoteButton(
+                  trackTitle: item.track.title,
+                  action: voteAction,
+                  onVote: onVote,
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            _Artwork(track: item.track),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _TrackDetails(
-                track: item.track,
-                details: 'Score ${item.score} · ${_voteLabel(item.voteCount)}',
-                proposedBy: item.proposedBy,
-              ),
-            ),
+            VoteFeedback(action: voteAction),
           ],
         ),
       ),

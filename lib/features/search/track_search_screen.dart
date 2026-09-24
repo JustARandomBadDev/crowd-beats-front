@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/track.dart';
+import '../room/room_controller.dart';
 import '../session/session_controller.dart';
+import '../vote/vote_action.dart';
+import '../vote/vote_controller.dart';
 import 'track_search_controller.dart';
 
 class TrackSearchScreen extends ConsumerStatefulWidget {
@@ -28,6 +31,12 @@ class _TrackSearchScreenState extends ConsumerState<TrackSearchScreen> {
     final provider = trackSearchControllerProvider(widget.session);
     final state = ref.watch(provider);
     final controller = ref.read(provider.notifier);
+    final roomKey = RoomSessionKey(
+      roomId: widget.session.roomId,
+      token: widget.session.token,
+    );
+    final voteState = ref.watch(voteControllerProvider(roomKey));
+    final voteController = ref.read(voteControllerProvider(roomKey).notifier);
     ref.listen(sessionControllerProvider, (_, next) {
       final active = next.active;
       if ((active?.roomId != widget.session.roomId ||
@@ -63,10 +72,66 @@ class _TrackSearchScreenState extends ConsumerState<TrackSearchScreen> {
               message: message,
               isError: state.proposalPhase == ProposalPhase.error,
             ),
+          if (state.proposal?.existingRoomTrack case final existing?)
+            _DuplicateVoteAction(
+              action: voteState.actionFor(existing.id),
+              votesRemaining: voteState.votesRemaining,
+              onVote: () => voteController.vote(existing.id),
+            ),
           Expanded(
             child: _SearchBody(state: state, controller: controller),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DuplicateVoteAction extends StatelessWidget {
+  const _DuplicateVoteAction({
+    required this.action,
+    required this.votesRemaining,
+    required this.onVote,
+  });
+
+  final TrackVoteState? action;
+  final int? votesRemaining;
+  final VoidCallback onVote;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(child: Text('Vote for the existing track')),
+                  VoteButton(
+                    trackTitle: 'this track',
+                    action: action,
+                    onVote: onVote,
+                  ),
+                ],
+              ),
+              VoteFeedback(action: action),
+              if (votesRemaining case final remaining?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    remaining == 1
+                        ? '1 personal vote remaining'
+                        : '$remaining personal votes remaining',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
