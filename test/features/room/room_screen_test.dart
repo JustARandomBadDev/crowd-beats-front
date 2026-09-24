@@ -2,6 +2,7 @@ import 'package:crowd_beats_front/core/api/api_client.dart';
 import 'package:crowd_beats_front/core/api/crowd_beats_api.dart';
 import 'package:crowd_beats_front/core/config/app_providers.dart';
 import 'package:crowd_beats_front/core/storage/session_storage.dart';
+import 'package:crowd_beats_front/core/theme/app_theme.dart';
 import 'package:crowd_beats_front/features/room/room_controller.dart';
 import 'package:crowd_beats_front/features/room/room_screen.dart';
 import 'package:crowd_beats_front/features/search/track_search_screen.dart';
@@ -36,9 +37,11 @@ class MemorySessionStorage extends SessionStorage {
 }
 
 class RoomHarness {
-  RoomHarness(Future<http.Response> Function(http.Request) handler)
-    : storage = MemorySessionStorage('token-a'),
-      sockets = FakeWebSocketTransport() {
+  RoomHarness(
+    Future<http.Response> Function(http.Request) handler, {
+    Duration reconnectDelay = Duration.zero,
+  }) : storage = MemorySessionStorage('token-a'),
+       sockets = FakeWebSocketTransport() {
     client = ApiClient(
       baseUrl: 'http://localhost:8080',
       httpClient: MockClient(handler),
@@ -48,6 +51,7 @@ class RoomHarness {
         sessionStorageProvider.overrideWithValue(storage),
         crowdBeatsApiProvider.overrideWithValue(CrowdBeatsApi(client)),
         webSocketServiceProvider.overrideWithValue(sockets),
+        roomReconnectDelayProvider.overrideWithValue((_) => reconnectDelay),
       ],
     );
   }
@@ -123,7 +127,7 @@ http.Response joinedRoomB() => apiResponse({
 
 Widget appFor(RoomHarness harness, Widget home) => UncontrolledProviderScope(
   container: harness.container,
-  child: MaterialApp(home: home),
+  child: MaterialApp(theme: AppTheme.dark, home: home),
 );
 
 Future<void> disposeHarness(WidgetTester tester, RoomHarness harness) async {
@@ -228,6 +232,40 @@ void main() {
     await tester.tap(find.text('Search music'));
     await tester.pumpAndSettle();
     expect(find.byType(TrackSearchScreen), findsOneWidget);
+    await disposeHarness(tester, harness);
+  });
+
+  testWidgets('reconnect warning keeps the last queue visible', (tester) async {
+    final harness = RoomHarness((request) async {
+      switch (request.url.path) {
+        case '/api/v1/sessions/me':
+          return currentSession(roomAId);
+        case '/api/v1/rooms/$roomAId':
+          return apiResponse(room(roomAId, 'Room A'));
+        case '/api/v1/rooms/$roomAId/queue':
+          return apiResponse(
+            queue(items: [queuedTrack(1, 'kept', 'Still Visible')]),
+          );
+        default:
+          throw StateError('Unexpected request ${request.url.path}');
+      }
+    }, reconnectDelay: const Duration(hours: 1));
+    addTearDown(harness.dispose);
+    await harness.bootstrap();
+
+    await tester.pumpWidget(appFor(harness, const RoomScreen()));
+    await tester.pumpAndSettle();
+    expect(find.text('Still Visible'), findsOneWidget);
+
+    await harness.sockets.connections.single.disconnect();
+    await tester.pump();
+
+    expect(
+      find.text('Live updates unavailable. Reconnecting…'),
+      findsOneWidget,
+    );
+    expect(find.text('Still Visible'), findsOneWidget);
+    expect(harness.sockets.requests, hasLength(1));
     await disposeHarness(tester, harness);
   });
 

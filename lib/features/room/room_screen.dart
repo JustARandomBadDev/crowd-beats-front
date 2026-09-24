@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_failure.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/app_widgets.dart';
 import '../../models/queue.dart';
 import '../../models/track.dart';
 import '../search/track_search_controller.dart';
@@ -27,7 +29,18 @@ class RoomScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(roomState.room?.name ?? active.roomName ?? 'Crowd Beats'),
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.graphic_eq_rounded,
+              size: 22,
+              color: AppColors.purpleLight,
+            ),
+            SizedBox(width: AppSpacing.small),
+            Text('CrowdBeats'),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Scan another room',
@@ -37,7 +50,7 @@ class RoomScreen extends ConsumerWidget {
                     await roomController.stop();
                     if (context.mounted) sessionController.startRoomSwitch();
                   },
-            icon: const Icon(Icons.qr_code_scanner),
+            icon: const Icon(Icons.qr_code_scanner_rounded),
           ),
           TextButton(
             onPressed: sessionState.busy
@@ -51,86 +64,88 @@ class RoomScreen extends ConsumerWidget {
                       roomController.resume();
                     }
                   },
-            child: const Text('Leave'),
+            child: sessionState.busy
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Leave'),
           ),
+          const SizedBox(width: AppSpacing.small),
         ],
       ),
       body: !roomState.hasData
           ? roomState.initialLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? const AppLoadingState(label: 'Loading the room…')
                 : _LoadError(
                     message: roomLoadErrorMessage(roomState.initialError),
                     onRetry: roomController.loadInitial,
                   )
           : RefreshIndicator(
-              onRefresh: () async {
-                await roomController.refresh();
-              },
+              onRefresh: () async => roomController.refresh(),
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.large,
+                  AppSpacing.small,
+                  AppSpacing.large,
+                  AppSpacing.xxLarge,
+                ),
                 children: [
-                  Text(
-                    roomState.room!.name,
-                    style: Theme.of(context).textTheme.headlineMedium,
+                  _RoomHeader(
+                    roomName: roomState.room!.name,
+                    nickname: active.nickname,
+                    state: roomState,
                   ),
-                  const SizedBox(height: 4),
-                  Text('Signed in as ${active.nickname}'),
-                  if (voteState.votesRemaining case final remaining?) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      remaining == 1
-                          ? '1 personal vote remaining'
-                          : '$remaining personal votes remaining',
-                    ),
-                  ],
                   if (_liveStatusMessage(roomState) case final message?) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.medium),
                     _LiveStatus(
                       message: message,
                       syncing: roomState.synchronizing,
                     ),
                   ],
                   if (sessionState.message != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      sessionState.message!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
+                    const SizedBox(height: AppSpacing.medium),
+                    AppMessageCard(
+                      message: sessionState.message!,
+                      tone: AppMessageTone.error,
+                      compact: true,
                     ),
                   ],
-                  if (roomState.queue!.nowPlaying case final nowPlaying?) ...[
-                    const SizedBox(height: 24),
-                    Text(
-                      'Now playing',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.xLarge),
+                  const AppSectionHeader(label: 'Now playing'),
+                  const SizedBox(height: AppSpacing.small),
+                  if (roomState.queue!.nowPlaying case final nowPlaying?)
                     _NowPlayingCard(
                       nowPlaying: nowPlaying,
                       voteAction: voteState.actionFor(nowPlaying.roomTrackId),
                       onVote: () => voteController.vote(nowPlaying.roomTrackId),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  Text(
-                    'Up next',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  if (roomState.queue!.items.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 32),
-                      child: Text(
-                        'The queue is empty.',
-                        textAlign: TextAlign.center,
-                      ),
                     )
+                  else
+                    const _NoTrackPlaying(),
+                  const SizedBox(height: AppSpacing.xLarge),
+                  AppSectionHeader(
+                    label: 'Up next',
+                    trailing: voteState.votesRemaining == null
+                        ? null
+                        : AppStatusChip(
+                            label: voteState.votesRemaining == 1
+                                ? '1 personal vote remaining'
+                                : '${voteState.votesRemaining} personal votes remaining',
+                            icon: Icons.how_to_vote_outlined,
+                          ),
+                  ),
+                  const SizedBox(height: AppSpacing.small),
+                  if (roomState.queue!.items.isEmpty)
+                    const _EmptyQueue()
                   else
                     for (final item in roomState.queue!.items)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.only(
+                          bottom: AppSpacing.small,
+                        ),
                         child: _QueueItemCard(
                           item: item,
                           voteAction: voteState.actionFor(item.roomTrackId),
@@ -140,23 +155,114 @@ class RoomScreen extends ConsumerWidget {
                 ],
               ),
             ),
-      floatingActionButton: roomState.hasData
-          ? FloatingActionButton.extended(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => TrackSearchScreen(
-                    session: TrackSearchSession(
-                      roomId: active.roomId,
-                      token: active.token,
+      bottomNavigationBar: roomState.hasData
+          ? SafeArea(
+              minimum: const EdgeInsets.fromLTRB(
+                AppSpacing.large,
+                AppSpacing.small,
+                AppSpacing.large,
+                AppSpacing.large,
+              ),
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => TrackSearchScreen(
+                      session: TrackSearchSession(
+                        roomId: active.roomId,
+                        token: active.token,
+                      ),
                     ),
                   ),
                 ),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Search music'),
               ),
-              icon: const Icon(Icons.search),
-              label: const Text('Search music'),
             )
           : null,
     );
+  }
+}
+
+class _RoomHeader extends StatelessWidget {
+  const _RoomHeader({
+    required this.roomName,
+    required this.nickname,
+    required this.state,
+  });
+
+  final String roomName;
+  final String nickname;
+  final RoomState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('YOU’RE IN', style: Theme.of(context).textTheme.labelSmall),
+              const SizedBox(height: AppSpacing.xSmall),
+              Text(
+                roomName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: AppSpacing.xSmall),
+              Text(
+                'Listening as $nickname',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: AppSpacing.medium),
+        _ConnectionChip(state: state),
+      ],
+    );
+  }
+}
+
+class _ConnectionChip extends StatelessWidget {
+  const _ConnectionChip({required this.state});
+
+  final RoomState state;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.synchronizing) {
+      return const AppStatusChip(
+        label: 'SYNCING',
+        icon: Icons.sync_rounded,
+        tone: AppMessageTone.warning,
+      );
+    }
+    return switch (state.connectionStatus) {
+      LiveConnectionStatus.connected => const AppStatusChip(
+        label: 'LIVE',
+        icon: Icons.circle,
+        tone: AppMessageTone.success,
+      ),
+      LiveConnectionStatus.connecting => const AppStatusChip(
+        label: 'CONNECTING',
+        icon: Icons.sync_rounded,
+      ),
+      LiveConnectionStatus.reconnecting => const AppStatusChip(
+        label: 'RECONNECTING',
+        icon: Icons.sync_problem_rounded,
+        tone: AppMessageTone.warning,
+      ),
+      LiveConnectionStatus.stopped => const AppStatusChip(
+        label: 'OFFLINE',
+        icon: Icons.cloud_off_outlined,
+        tone: AppMessageTone.warning,
+      ),
+    };
   }
 }
 
@@ -168,26 +274,11 @@ class _LiveStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          children: [
-            if (syncing) ...[
-              const SizedBox.square(
-                dimension: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 8),
-            ],
-            Expanded(child: Text(message)),
-          ],
-        ),
-      ),
+    return AppMessageCard(
+      message: message,
+      tone: syncing ? AppMessageTone.neutral : AppMessageTone.warning,
+      icon: syncing ? Icons.sync_rounded : Icons.cloud_off_outlined,
+      compact: true,
     );
   }
 }
@@ -213,14 +304,19 @@ class _LoadError extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Retry')),
-          ],
+        padding: const EdgeInsets.all(AppSpacing.xLarge),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: AppMessageCard(
+            title: 'Could not load the room',
+            message: message,
+            tone: AppMessageTone.error,
+            action: FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ),
         ),
       ),
     );
@@ -240,34 +336,70 @@ class _NowPlayingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: Theme.of(context).colorScheme.primaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                _Artwork(track: nowPlaying.track),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _TrackDetails(
-                    track: nowPlaying.track,
-                    details: _voteLabel(nowPlaying.voteCount),
-                    proposedBy: nowPlaying.proposedBy,
-                  ),
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.large),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceStrong,
+        borderRadius: BorderRadius.circular(AppRadii.large),
+        border: Border.all(color: AppColors.purpleMuted),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              TrackArtwork(
+                imageUrl: nowPlaying.track.imageUrl,
+                size: 78,
+                radius: AppRadii.medium,
+              ),
+              const SizedBox(width: AppSpacing.large),
+              Expanded(
+                child: _TrackDetails(
+                  track: nowPlaying.track,
+                  details: _voteLabel(nowPlaying.voteCount),
+                  proposedBy: nowPlaying.proposedBy,
+                  prominent: true,
                 ),
-                VoteButton(
-                  trackTitle: nowPlaying.track.title,
-                  action: voteAction,
-                  onVote: onVote,
-                ),
-              ],
+              ),
+              const SizedBox(width: AppSpacing.small),
+              VoteButton(
+                trackTitle: nowPlaying.track.title,
+                action: voteAction,
+                onVote: onVote,
+              ),
+            ],
+          ),
+          VoteFeedback(action: voteAction),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoTrackPlaying extends StatelessWidget {
+  const _NoTrackPlaying();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.large),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundRaised,
+        borderRadius: BorderRadius.circular(AppRadii.medium),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.music_off_outlined, color: AppColors.textMuted),
+          const SizedBox(width: AppSpacing.medium),
+          Expanded(
+            child: Text(
+              'Nothing is playing right now.',
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
-            VoteFeedback(action: voteAction),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -288,31 +420,34 @@ class _QueueItemCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.medium),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 SizedBox(
-                  width: 32,
+                  width: 28,
                   child: Text(
                     '${item.position}',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppColors.purpleLight,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                _Artwork(track: item.track),
-                const SizedBox(width: 12),
+                const SizedBox(width: AppSpacing.small),
+                TrackArtwork(imageUrl: item.track.imageUrl, size: 54),
+                const SizedBox(width: AppSpacing.medium),
                 Expanded(
                   child: _TrackDetails(
                     track: item.track,
                     details:
-                        'Score ${item.score} · ${_voteLabel(item.voteCount)}',
+                        'Score ${item.score}  ·  ${_voteLabel(item.voteCount)}',
                     proposedBy: item.proposedBy,
                   ),
                 ),
+                const SizedBox(width: AppSpacing.small),
                 VoteButton(
                   trackTitle: item.track.title,
                   action: voteAction,
@@ -333,11 +468,13 @@ class _TrackDetails extends StatelessWidget {
     required this.track,
     required this.details,
     required this.proposedBy,
+    this.prominent = false,
   });
 
   final SpotifyTrackDto track;
   final String details;
   final String? proposedBy;
+  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
@@ -348,10 +485,18 @@ class _TrackDetails extends StatelessWidget {
           track.title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium,
+          style: prominent
+              ? Theme.of(context).textTheme.titleLarge
+              : Theme.of(context).textTheme.titleMedium,
         ),
-        Text(track.artistNames, maxLines: 1, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
+        Text(
+          track.artistNames,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: AppSpacing.xSmall),
         Text(details, style: Theme.of(context).textTheme.bodySmall),
         if (proposedBy case final nickname?)
           Text(
@@ -365,31 +510,40 @@ class _TrackDetails extends StatelessWidget {
   }
 }
 
-class _Artwork extends StatelessWidget {
-  const _Artwork({required this.track});
-
-  final SpotifyTrackDto track;
+class _EmptyQueue extends StatelessWidget {
+  const _EmptyQueue();
 
   @override
   Widget build(BuildContext context) {
-    final placeholder = ColoredBox(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: const Center(child: Icon(Icons.music_note)),
-    );
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: SizedBox.square(
-        dimension: 56,
-        child: track.imageUrl.isEmpty
-            ? placeholder
-            : Image.network(
-                track.imageUrl,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, progress) => progress == null
-                    ? child
-                    : const Center(child: CircularProgressIndicator()),
-                errorBuilder: (context, error, stackTrace) => placeholder,
-              ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xLarge),
+      child: Column(
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Icon(
+              Icons.queue_music_rounded,
+              color: AppColors.purpleLight,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.medium),
+          Text(
+            'The queue is empty.',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: AppSpacing.xSmall),
+          Text(
+            'Search for a track to get the music started.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
       ),
     );
   }

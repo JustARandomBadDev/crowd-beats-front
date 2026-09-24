@@ -5,6 +5,7 @@ import 'package:crowd_beats_front/core/api/api_client.dart';
 import 'package:crowd_beats_front/core/api/crowd_beats_api.dart';
 import 'package:crowd_beats_front/core/config/app_providers.dart';
 import 'package:crowd_beats_front/core/storage/session_storage.dart';
+import 'package:crowd_beats_front/core/theme/app_theme.dart';
 import 'package:crowd_beats_front/features/room/room_controller.dart';
 import 'package:crowd_beats_front/features/search/track_search_controller.dart';
 import 'package:crowd_beats_front/features/search/track_search_screen.dart';
@@ -395,7 +396,10 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: harness.container,
-        child: const MaterialApp(home: TrackSearchScreen(session: sessionA)),
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          home: const TrackSearchScreen(session: sessionA),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -415,6 +419,46 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox.shrink());
     subscription.close();
+    harness.dispose();
+  });
+
+  testWidgets('search screen renders results and a valid empty state', (
+    tester,
+  ) async {
+    final harness = SearchHarness((request) async {
+      if (request.url.path == '/api/v1/sessions/me') {
+        return currentSession(roomAId);
+      }
+      if (request.url.queryParameters['q'] == 'empty') {
+        return searchResults([]);
+      }
+      return searchResults([track(trackAId, 'A very long result title')]);
+    });
+    addTearDown(harness.dispose);
+    await harness.bootstrap();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: harness.container,
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          home: const TrackSearchScreen(session: sessionA),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'house');
+    await tester.tap(find.byTooltip('Search'));
+    await tester.pumpAndSettle();
+    expect(find.text('A very long result title'), findsOneWidget);
+    expect(find.byTooltip('Propose A very long result title'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'empty');
+    await tester.tap(find.byTooltip('Search'));
+    await tester.pumpAndSettle();
+    expect(find.text('No tracks found'), findsOneWidget);
+    expect(find.text('Try another title, artist, or album.'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
     harness.dispose();
   });
 
