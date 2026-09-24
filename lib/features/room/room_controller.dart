@@ -199,9 +199,9 @@ class RoomController extends Notifier<RoomState> {
   }
 
   void resume() {
-    if (_disposed || !_stopped || !state.hasData) return;
+    if (_disposed || !_stopped) return;
     _stopped = false;
-    unawaited(_connect());
+    if (state.hasData) unawaited(_connect());
   }
 
   Future<void> _connect() async {
@@ -254,6 +254,12 @@ class RoomController extends Notifier<RoomState> {
       _scheduleReconnect();
     } finally {
       _connecting = false;
+      if (!_disposed &&
+          !_stopped &&
+          _connection == null &&
+          _reconnectTimer?.isActive != true) {
+        unawaited(_connect());
+      }
     }
   }
 

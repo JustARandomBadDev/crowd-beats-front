@@ -4,6 +4,7 @@ import '../../models/room.dart';
 import '../../models/session.dart';
 import '../../models/track.dart';
 import 'api_client.dart';
+import 'api_failure.dart';
 import 'api_paths.dart';
 
 class CrowdBeatsApi {
@@ -81,10 +82,22 @@ class CrowdBeatsApi {
     required String roomId,
     required String token,
     required VoteRequestDto request,
-  }) => _client.post(
-    ApiPaths.votes(roomId),
-    bearerToken: token,
-    body: request.toJson(),
-    decode: VoteResponseDto.fromJson,
-  );
+  }) async {
+    final response = await _client.post(
+      ApiPaths.votes(roomId),
+      bearerToken: token,
+      body: request.toJson(),
+      decode: VoteResponseDto.fromJson,
+    );
+    final vote = response.data;
+    if (!vote.voteAdded || vote.roomTrackId != request.roomTrackId) {
+      throw ApiFailure(
+        ApiFailureCategory.protocol,
+        statusCode: response.statusCode,
+        meta: response.meta,
+        cause: const FormatException('Invalid vote confirmation'),
+      );
+    }
+    return response;
+  }
 }

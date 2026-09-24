@@ -2,7 +2,7 @@
 
 Frontend mobile Flutter pour Crowd Beats, app mobile type Crowd DJ.
 
-Ce dépôt contient le socle de développement frontend : bootstrap Flutter, DTOs REST, service API typé, configuration locale, WebSocket minimal et stockage de token. Les parcours métier restent à implémenter selon le contrat figé du backend.
+Le client implémente le parcours MVP invité : join par QR, restauration et heartbeat de session, room et queue REST, synchronisation WebSocket, recherche Spotify via le backend, proposition, vote et leave/changement de room.
 
 ## Installation
 
@@ -62,14 +62,15 @@ Content-Type: application/json
 Authorization: Bearer <session_token>
 ```
 
-## Flow De Test Local
+## Parcours de test local
 
 1. Lancer le backend local sur le port `8080`.
 2. Créer une room côté backend.
 3. Créer ou récupérer le QR code de join.
 4. Lancer l'app Flutter avec `flutter run`.
-5. Vérifier l'écran placeholder `App ready`.
-6. Utiliser le bouton `Test API` pour vérifier `GET /health/ready` (HTTP 200 si PostgreSQL est disponible, 503 sinon).
+5. Scanner le QR, saisir un pseudo et vérifier l'entrée dans la room.
+6. Vérifier la queue initiale, la synchronisation temps réel, la recherche, la proposition et le vote.
+7. Relancer l'app pour vérifier la restauration de session, puis utiliser `Leave` pour revenir au join.
 
 ## Structure
 
@@ -82,17 +83,17 @@ lib/
     config/
   models/
   features/
-    join/
     room/
+    search/
+    session/
+    vote/
   main.dart
 ```
 
-## Limitations Actuelles
+## Contrat backend
 
 - Le contrat public backend est figé : les réponses REST utilisent l'enveloppe `data/error/meta` et des clés `snake_case`. Voir `../crowd-beats-api/docs/api.md`.
 - Le join se fait par `POST /api/v1/rooms/join-by-qr` avec `qr_code` et `nickname`. La réponse contient `session.token` et `ws.url` (chemin relatif) ; le QR transmet un code, pas une image ou une URL renvoyée par l'API.
 - Le WebSocket utilise `Authorization: Bearer <session_token>` et `room_id`. Après `sync_required`, charger `GET /api/v1/rooms/{roomID}/queue` ; `queue_updated` contient un snapshot complet. Voir `../crowd-beats-api/docs/websocket.md`.
-- Les DTOs REST et les routes mobiles figées sont définis dans `lib/models/` et `lib/core/api/` ; aucune requête métier n'est encore déclenchée par l'interface.
-- La restauration complète de session et la synchronisation de queue restent à implémenter.
-- Le MVP est en construction.
-- Aucun écran métier complet n'est implémenté dans ce socle.
+- Les recherches Spotify passent exclusivement par le backend. Le client ne contient ni credential ni SDK Spotify.
+- Les réponses REST confirment les propositions et votes personnels. Seuls les snapshots REST et `queue_updated` définissent la queue partagée et son ordre.

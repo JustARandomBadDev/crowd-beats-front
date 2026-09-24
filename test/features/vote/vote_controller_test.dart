@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:crowd_beats_front/core/api/api_client.dart';
+import 'package:crowd_beats_front/core/api/api_failure.dart';
 import 'package:crowd_beats_front/core/api/crowd_beats_api.dart';
 import 'package:crowd_beats_front/core/config/app_providers.dart';
 import 'package:crowd_beats_front/core/storage/session_storage.dart';
@@ -328,6 +329,35 @@ void main() {
     expect(action.phase, VotePhase.accepted);
     expect(votes, 2);
   });
+
+  test(
+    'mismatched successful vote response is rejected as protocol data',
+    () async {
+      final harness = VoteHarness((request) async {
+        if (request.url.path == '/api/v1/sessions/me') return currentSession();
+        return voteResponse(
+          roomTrackBId,
+          currentVoteCount: 2,
+          votesRemaining: 4,
+        );
+      });
+      addTearDown(harness.dispose);
+      await harness.bootstrap();
+      final subscription = listenToVotes(harness);
+      addTearDown(subscription.close);
+
+      await harness.container
+          .read(voteControllerProvider(roomAKey).notifier)
+          .vote(roomTrackAId);
+
+      final state = harness.container.read(voteControllerProvider(roomAKey));
+      final action = state.actionFor(roomTrackAId)!;
+      expect(action.phase, VotePhase.error);
+      expect(action.message, contains('unexpected vote response'));
+      expect(action.failure?.category, ApiFailureCategory.protocol);
+      expect(state.votesRemaining, isNull);
+    },
+  );
 
   test('authoritative 401 invalidates the matching session', () async {
     final harness = VoteHarness((request) async {

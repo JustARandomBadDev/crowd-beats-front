@@ -308,6 +308,15 @@ class SessionController extends Notifier<SessionState> {
 
   Future<void> _clearInvalidSession({bool expired = true}) async {
     _stopHeartbeat();
+    final current = state;
+    state = SessionState(
+      phase: current.phase,
+      active: current.active,
+      switching: current.switching,
+      busy: true,
+      message: current.message,
+      pendingJoin: current.pendingJoin,
+    );
     try {
       await _storage.clearSession();
       if (_disposed) return;

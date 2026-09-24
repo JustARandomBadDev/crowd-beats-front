@@ -37,6 +37,21 @@ class MemorySessionStorage extends SessionStorage {
   }
 }
 
+class DelayedClearStorage extends MemorySessionStorage {
+  DelayedClearStorage(super.token);
+
+  final clearStarted = Completer<void>();
+  final finishClear = Completer<void>();
+
+  @override
+  Future<void> clearSession() async {
+    clears++;
+    clearStarted.complete();
+    await finishClear.future;
+    token = null;
+  }
+}
+
 http.Response currentSession(String roomId) => apiResponse({
   'session': {
     'id': 'session-id',
@@ -327,6 +342,36 @@ void main() {
       expect(h.state.phase, SessionPhase.invalid);
       expect(h.storage.token, isNull);
       expect(h.controller.heartbeatScheduled, isFalse);
+    },
+  );
+
+  test(
+    'session invalidation blocks a new join until token deletion ends',
+    () async {
+      final storage = DelayedClearStorage('old');
+      var joins = 0;
+      final h = Harness(storage, (request) async {
+        if (request.url.path.endsWith('/sessions/me')) {
+          return currentSession(roomId);
+        }
+        joins++;
+        return joined('new');
+      });
+      addTearDown(h.dispose);
+      await h.controller.bootstrap();
+
+      final invalidation = h.controller.invalidateFromServer(token: 'old');
+      await storage.clearStarted.future;
+      expect(h.state.busy, isTrue);
+      h.controller.startRoomSwitch();
+      await h.controller.join(qrCode: 'new-room', nickname: 'Camille');
+
+      expect(joins, 0);
+      expect(storage.token, 'old');
+      storage.finishClear.complete();
+      await invalidation;
+      expect(h.state.phase, SessionPhase.invalid);
+      expect(storage.token, isNull);
     },
   );
 }

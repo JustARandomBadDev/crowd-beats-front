@@ -482,6 +482,42 @@ void main() {
   });
 
   test(
+    'older search 401 still invalidates the unchanged active session',
+    () async {
+      final older = Completer<http.Response>();
+      final newer = Completer<http.Response>();
+      final harness = SearchHarness((request) async {
+        if (request.url.path == '/api/v1/sessions/me') {
+          return currentSession(roomAId);
+        }
+        return request.url.queryParameters['q'] == 'older'
+            ? older.future
+            : newer.future;
+      });
+      addTearDown(harness.dispose);
+      await harness.bootstrap();
+      final subscription = listenToSearch(harness);
+      addTearDown(subscription.close);
+      final controller = harness.container.read(
+        trackSearchControllerProvider(sessionA).notifier,
+      );
+
+      final olderRequest = controller.search('older');
+      final newerRequest = controller.search('newer');
+      older.complete(apiError('UNAUTHORIZED', status: 401));
+      await olderRequest;
+      newer.complete(searchResults([track(trackBId, 'Ignored Result')]));
+      await newerRequest;
+
+      expect(harness.storage.token, isNull);
+      expect(
+        harness.container.read(sessionControllerProvider).phase,
+        SessionPhase.invalid,
+      );
+    },
+  );
+
+  test(
     'late Room A search and proposal cannot affect or invalidate B',
     () async {
       final pending = Completer<http.Response>();

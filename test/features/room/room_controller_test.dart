@@ -65,6 +65,36 @@ class ControllerHarness {
   }
 }
 
+class DelayedWebSocketTransport implements WebSocketTransport {
+  final requests = <SocketRequest>[];
+  final firstConnection = Completer<RoomWebSocketConnection>();
+  final connections = <FakeRoomWebSocketConnection>[];
+
+  @override
+  Future<RoomWebSocketConnection> connect({
+    required String roomId,
+    required String token,
+  }) async {
+    requests.add(SocketRequest(roomId: roomId, token: token));
+    if (requests.length == 1) return firstConnection.future;
+    final connection = FakeRoomWebSocketConnection();
+    connections.add(connection);
+    return connection;
+  }
+}
+
+class ImmediateCloseConnection implements RoomWebSocketConnection {
+  bool closed = false;
+
+  @override
+  Stream<Object?> get messages => const Stream.empty();
+
+  @override
+  Future<void> close() async {
+    closed = true;
+  }
+}
+
 Map<String, dynamic> room(String id, String name) => {
   ...roomJson,
   'id': id,
@@ -392,6 +422,81 @@ void main() {
       LiveConnectionStatus.stopped,
     );
   });
+
+  test('resume during an obsolete handshake starts a fresh socket', () async {
+    final storage = MemoryStorage('token-a');
+    final sockets = DelayedWebSocketTransport();
+    final client = ApiClient(
+      baseUrl: 'http://localhost:8080',
+      httpClient: MockClient(
+        (request) async => request.url.path.endsWith('/queue')
+            ? apiResponse(queueAt('2026-09-21T08:00:00Z'))
+            : apiResponse(room(roomAId, 'Room A')),
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        sessionStorageProvider.overrideWithValue(storage),
+        crowdBeatsApiProvider.overrideWithValue(CrowdBeatsApi(client)),
+        webSocketServiceProvider.overrideWithValue(sockets),
+        roomReconnectDelayProvider.overrideWithValue((_) => Duration.zero),
+      ],
+    );
+    addTearDown(() {
+      container.dispose();
+      client.close();
+    });
+    const key = RoomSessionKey(roomId: roomAId, token: 'token-a');
+    final subscription = listenToRoom(container, key);
+    addTearDown(subscription.close);
+    await flushEvents();
+    expect(sockets.requests, hasLength(1));
+
+    final controller = container.read(roomControllerProvider(key).notifier);
+    await controller.stop();
+    controller.resume();
+    final obsoleteConnection = ImmediateCloseConnection();
+    sockets.firstConnection.complete(obsoleteConnection);
+    await flushEvents();
+
+    expect(obsoleteConnection.closed, isTrue);
+    expect(sockets.requests, hasLength(2));
+    expect(sockets.connections, hasLength(1));
+    expect(
+      container.read(roomControllerProvider(key)).connectionStatus,
+      LiveConnectionStatus.connected,
+    );
+  });
+
+  test(
+    'resume before initial REST finishes permits the first socket',
+    () async {
+      final pendingQueue = Completer<http.Response>();
+      final harness = ControllerHarness((request) async {
+        if (request.url.path.endsWith('/queue')) return pendingQueue.future;
+        return apiResponse(room(roomAId, 'Room A'));
+      });
+      addTearDown(harness.dispose);
+      const key = RoomSessionKey(roomId: roomAId, token: 'token-a');
+      final subscription = listenToRoom(harness.container, key);
+      addTearDown(subscription.close);
+      await flushEvents();
+
+      final controller = harness.container.read(
+        roomControllerProvider(key).notifier,
+      );
+      await controller.stop();
+      controller.resume();
+      pendingQueue.complete(apiResponse(queueAt('2026-09-21T08:00:00Z')));
+      await flushEvents();
+
+      expect(harness.sockets.requests, hasLength(1));
+      expect(
+        harness.container.read(roomControllerProvider(key)).connectionStatus,
+        LiveConnectionStatus.connected,
+      );
+    },
+  );
 
   test('unknown and malformed messages do not discard the queue', () async {
     final harness = ControllerHarness((request) async {

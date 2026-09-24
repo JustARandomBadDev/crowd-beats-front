@@ -154,13 +154,14 @@ class TrackSearchController extends Notifier<TrackSearchState> {
         searchFailure: null,
       );
     } on ApiFailure catch (failure) {
-      if (!_canApply(generation)) return;
+      if (_disposed || !_matchesActiveSession()) return;
       if (isInvalidSession(failure)) {
         await ref
             .read(sessionControllerProvider.notifier)
             .invalidateFromServer(token: session.token);
         return;
       }
+      if (generation != _searchGeneration) return;
       state = state.copyWith(
         searchPhase: SearchPhase.error,
         searchMessage: searchFailureMessage(failure),
