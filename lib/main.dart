@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'core/api/api_client.dart';
 import 'core/config/app_config.dart';
-import 'core/config/app_providers.dart';
+import 'core/theme/app_theme.dart';
+import 'core/widgets/app_widgets.dart';
+import 'features/room/room_screen.dart';
+import 'features/session/join_screen.dart';
+import 'features/session/session_controller.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AppConfig.validate();
   runApp(const ProviderScope(child: CrowdBeatsApp()));
 }
 
@@ -17,80 +22,74 @@ class CrowdBeatsApp extends StatelessWidget {
     return MaterialApp(
       title: 'Crowd Beats',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-      ),
-      home: const AppReadyScreen(),
+      theme: AppTheme.dark,
+      home: const SessionGateway(),
     );
   }
 }
 
-class AppReadyScreen extends ConsumerStatefulWidget {
-  const AppReadyScreen({super.key});
+class SessionGateway extends ConsumerStatefulWidget {
+  const SessionGateway({super.key});
 
   @override
-  ConsumerState<AppReadyScreen> createState() => _AppReadyScreenState();
+  ConsumerState<SessionGateway> createState() => _SessionGatewayState();
 }
 
-class _AppReadyScreenState extends ConsumerState<AppReadyScreen> {
-  String? _apiStatus;
-
-  Future<void> _testApi() async {
-    setState(() => _apiStatus = 'Testing API...');
-
-    try {
-      final response = await ref
-          .read(apiClientProvider)
-          .get<Object?>('/health/ready');
-      setState(() => _apiStatus = 'API reachable: ${response.raw ?? 'ok'}');
-    } on ApiException catch (error) {
-      setState(() {
-        _apiStatus =
-            'API responded with ${error.statusCode}: '
-            '${error.message ?? 'no details'}';
-      });
-    } on Object catch (error) {
-      setState(() => _apiStatus = 'API unavailable: $error');
-    }
+class _SessionGatewayState extends ConsumerState<SessionGateway> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() {
+      if (mounted) ref.read(sessionControllerProvider.notifier).bootstrap();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Crowd Beats')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'App ready',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium,
+    final session = ref.watch(sessionControllerProvider);
+    if (session.phase == SessionPhase.checking) {
+      return const Scaffold(
+        body: AppLoadingState(label: 'Getting your room ready…'),
+      );
+    }
+    if (session.phase == SessionPhase.error) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('CrowdBeats')),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: AppMessageCard(
+                title: 'Could not restore your room',
+                message: session.message ?? 'Please check your connection.',
+                tone: AppMessageTone.error,
+                action: FilledButton.icon(
+                  onPressed: session.busy
+                      ? null
+                      : session.pendingJoin != null
+                      ? () => ref
+                            .read(sessionControllerProvider.notifier)
+                            .retrySave()
+                      : () => ref
+                            .read(sessionControllerProvider.notifier)
+                            .bootstrap(),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text(
+                    session.pendingJoin != null
+                        ? 'Retry saving session'
+                        : 'Retry',
+                  ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'API: ${AppConfig.apiBaseUrl}\nWS: ${AppConfig.wsBaseUrl}',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: _testApi,
-                  child: const Text('Test API'),
-                ),
-                if (_apiStatus != null) ...[
-                  const SizedBox(height: 16),
-                  Text(_apiStatus!, textAlign: TextAlign.center),
-                ],
-              ],
+              ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    }
+    if (session.phase == SessionPhase.active && !session.switching) {
+      return const RoomScreen();
+    }
+    return const JoinScreen();
   }
 }

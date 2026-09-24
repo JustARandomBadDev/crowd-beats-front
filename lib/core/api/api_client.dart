@@ -1,207 +1,227 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
+
+import '../../models/json_fields.dart';
+import 'api_failure.dart';
 
 class ApiClient {
   ApiClient({
     required String baseUrl,
     http.Client? httpClient,
-    Future<String?> Function()? tokenProvider,
-  }) : _baseUri = Uri.parse(baseUrl),
-       _httpClient = httpClient ?? http.Client(),
-       _tokenProvider = tokenProvider;
+    this.timeout = const Duration(seconds: 15),
+  }) : _baseUri = _parseBaseUrl(baseUrl),
+       _httpClient = httpClient ?? http.Client();
 
   final Uri _baseUri;
   final http.Client _httpClient;
-  final Future<String?> Function()? _tokenProvider;
+  final Duration timeout;
 
   Future<ApiResponse<T>> get<T>(
     String path, {
+    String? bearerToken,
     Map<String, String>? queryParameters,
-    T Function(Object? json)? decoder,
-  }) {
-    return _send<T>(
-      'GET',
-      path,
-      queryParameters: queryParameters,
-      decoder: decoder,
-    );
-  }
+    Set<int> additionalDataStatuses = const {},
+    required T Function(Object? data) decode,
+  }) => _send(
+    'GET',
+    path,
+    bearerToken: bearerToken,
+    queryParameters: queryParameters,
+    additionalDataStatuses: additionalDataStatuses,
+    decode: decode,
+  );
 
   Future<ApiResponse<T>> post<T>(
     String path, {
+    String? bearerToken,
     Object? body,
-    Map<String, String>? queryParameters,
-    T Function(Object? json)? decoder,
-  }) {
-    return _send<T>(
-      'POST',
-      path,
-      body: body,
-      queryParameters: queryParameters,
-      decoder: decoder,
-    );
-  }
-
-  Future<ApiResponse<T>> delete<T>(
-    String path, {
-    Map<String, String>? queryParameters,
-    T Function(Object? json)? decoder,
-  }) {
-    return _send<T>(
-      'DELETE',
-      path,
-      queryParameters: queryParameters,
-      decoder: decoder,
-    );
-  }
+    required T Function(Object? data) decode,
+  }) =>
+      _send('POST', path, bearerToken: bearerToken, body: body, decode: decode);
 
   Future<ApiResponse<T>> _send<T>(
     String method,
     String path, {
-    Object? body,
+    String? bearerToken,
     Map<String, String>? queryParameters,
-    T Function(Object? json)? decoder,
+    Object? body,
+    Set<int> additionalDataStatuses = const {},
+    required T Function(Object? data) decode,
   }) async {
-    final request = http.Request(method, _resolve(path, queryParameters));
-    request.headers.addAll(await _headers());
+    if (bearerToken != null && bearerToken.isEmpty) {
+      throw ArgumentError.value(
+        bearerToken,
+        'bearerToken',
+        'Must not be empty',
+      );
+    }
 
+    final request = http.Request(method, _resolve(path, queryParameters));
+    request.headers['Content-Type'] = 'application/json';
+    if (bearerToken != null) {
+      request.headers['Authorization'] = 'Bearer $bearerToken';
+    }
     if (body != null) {
       request.body = jsonEncode(body);
     }
 
-    final streamedResponse = await _httpClient.send(request);
-    final response = await http.Response.fromStream(streamedResponse);
-    final decodedBody = _decodeBody(response.body);
-    final apiResponse = ApiResponse<T>.fromJson(decodedBody, decoder: decoder);
+    late final http.Response response;
+    try {
+      response = await _httpClient
+          .send(request)
+          .then(http.Response.fromStream)
+          .timeout(timeout);
+    } on TimeoutException catch (error) {
+      throw ApiFailure(ApiFailureCategory.timeout, cause: error);
+    } on IOException catch (error) {
+      throw ApiFailure(ApiFailureCategory.transport, cause: error);
+    } on http.ClientException catch (error) {
+      throw ApiFailure(ApiFailureCategory.transport, cause: error);
+    }
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw ApiException(
+    late final Object? decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException catch (error) {
+      throw ApiFailure(
+        ApiFailureCategory.invalidJson,
         statusCode: response.statusCode,
-        message: _errorMessage(apiResponse.error) ?? response.reasonPhrase,
-        response: apiResponse,
+        cause: error,
       );
     }
 
-    if (apiResponse.error != null) {
-      throw ApiException(
+    final Map<String, dynamic> envelope;
+    final Map<String, dynamic> meta;
+    try {
+      envelope = JsonFields.object(decoded, 'response');
+      if (!envelope.containsKey('data') ||
+          !envelope.containsKey('error') ||
+          !envelope.containsKey('meta')) {
+        throw const FormatException('Missing data, error or meta');
+      }
+      meta = JsonFields.object(envelope['meta'], 'meta');
+      if (envelope['data'] != null && envelope['error'] != null) {
+        throw const FormatException('Response contains both data and error');
+      }
+    } on FormatException catch (error) {
+      throw ApiFailure(
+        ApiFailureCategory.protocol,
         statusCode: response.statusCode,
-        message: _errorMessage(apiResponse.error),
-        response: apiResponse,
+        cause: error,
       );
     }
 
-    return apiResponse;
-  }
-
-  Uri _resolve(String path, Map<String, String>? queryParameters) {
-    final normalizedPath = path.startsWith('/') ? path.substring(1) : path;
-    final uri = _baseUri.resolve(normalizedPath);
-
-    if (queryParameters == null || queryParameters.isEmpty) {
-      return uri;
+    if (envelope['error'] != null) {
+      try {
+        final backendError = BackendError.fromJson(envelope['error']);
+        throw ApiFailure(
+          ApiFailureCategory.backend,
+          statusCode: response.statusCode,
+          backendError: backendError,
+          meta: meta,
+        );
+      } on FormatException catch (error) {
+        throw ApiFailure(
+          ApiFailureCategory.protocol,
+          statusCode: response.statusCode,
+          cause: error,
+        );
+      }
     }
 
-    return uri.replace(
-      queryParameters: {...uri.queryParameters, ...queryParameters},
-    );
-  }
+    if ((response.statusCode < 200 || response.statusCode >= 300) &&
+        !additionalDataStatuses.contains(response.statusCode)) {
+      throw ApiFailure(
+        ApiFailureCategory.protocol,
+        statusCode: response.statusCode,
+        meta: meta,
+        cause: const FormatException('Non-success HTTP status without error'),
+      );
+    }
 
-  Future<Map<String, String>> _headers() async {
-    final token = await _tokenProvider?.call();
-
-    return {
-      'Content-Type': 'application/json',
-      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-    };
-  }
-
-  Object? _decodeBody(String body) {
-    if (body.isEmpty) {
-      return null;
+    if (envelope['data'] == null) {
+      throw ApiFailure(
+        ApiFailureCategory.protocol,
+        statusCode: response.statusCode,
+        meta: meta,
+        cause: const FormatException('Success response has no data'),
+      );
     }
 
     try {
-      return jsonDecode(body);
-    } on FormatException {
-      return body;
+      return ApiResponse(
+        data: decode(envelope['data']),
+        statusCode: response.statusCode,
+        meta: meta,
+      );
+    } on FormatException catch (error) {
+      throw ApiFailure(
+        ApiFailureCategory.protocol,
+        statusCode: response.statusCode,
+        meta: meta,
+        cause: error,
+      );
+    } on TypeError catch (error) {
+      throw ApiFailure(
+        ApiFailureCategory.protocol,
+        statusCode: response.statusCode,
+        meta: meta,
+        cause: error,
+      );
     }
   }
 
-  String? _errorMessage(Object? error) {
-    if (error == null) {
-      return null;
+  Uri _resolve(String path, Map<String, String>? queryParameters) {
+    final relative = Uri.parse(path);
+    if (relative.hasScheme ||
+        relative.hasAuthority ||
+        relative.hasQuery ||
+        relative.hasFragment) {
+      throw ArgumentError.value(path, 'path', 'Expected an endpoint path');
     }
+    return _baseUri.replace(
+      pathSegments: [
+        ..._baseUri.pathSegments.where((segment) => segment.isNotEmpty),
+        ...relative.pathSegments.where((segment) => segment.isNotEmpty),
+      ],
+      queryParameters: queryParameters == null || queryParameters.isEmpty
+          ? null
+          : queryParameters,
+    );
+  }
 
-    if (error is String) {
-      return error;
+  void close() => _httpClient.close();
+
+  static Uri _parseBaseUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        !uri.hasAuthority ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      throw ArgumentError.value(
+        value,
+        'baseUrl',
+        'Expected an HTTP(S) base URL',
+      );
     }
-
-    if (error is Map<String, dynamic>) {
-      final message = error['message'] ?? error['Message'] ?? error['error'];
-      return message?.toString();
-    }
-
-    return error.toString();
+    return uri;
   }
 }
 
 class ApiResponse<T> {
   const ApiResponse({
     required this.data,
-    required this.error,
-    required this.meta,
-    required this.raw,
-  });
-
-  final T? data;
-  final Object? error;
-  final Map<String, dynamic>? meta;
-  final Object? raw;
-
-  factory ApiResponse.fromJson(
-    Object? json, {
-    T Function(Object? json)? decoder,
-  }) {
-    if (json is Map<String, dynamic> &&
-        (json.containsKey('data') ||
-            json.containsKey('error') ||
-            json.containsKey('meta'))) {
-      final rawData = json['data'];
-
-      return ApiResponse<T>(
-        data: decoder != null ? decoder(rawData) : rawData as T?,
-        error: json['error'],
-        meta: json['meta'] is Map<String, dynamic>
-            ? json['meta'] as Map<String, dynamic>
-            : null,
-        raw: json,
-      );
-    }
-
-    return ApiResponse<T>(
-      data: decoder != null ? decoder(json) : json as T?,
-      error: null,
-      meta: null,
-      raw: json,
-    );
-  }
-}
-
-class ApiException implements Exception {
-  const ApiException({
     required this.statusCode,
-    required this.response,
-    this.message,
+    required this.meta,
   });
 
+  final T data;
   final int statusCode;
-  final String? message;
-  final ApiResponse<Object?> response;
-
-  @override
-  String toString() {
-    final details = message == null ? '' : ': $message';
-    return 'ApiException($statusCode)$details';
-  }
+  final Map<String, dynamic> meta;
 }
