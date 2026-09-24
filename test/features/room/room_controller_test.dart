@@ -319,6 +319,54 @@ void main() {
   });
 
   test(
+    'manual refresh reloads REST state without replacing the socket',
+    () async {
+      var roomRequests = 0;
+      var queueRequests = 0;
+      final harness = ControllerHarness((request) async {
+        if (request.url.path.endsWith('/queue')) {
+          queueRequests++;
+          return apiResponse(
+            queueAt(
+              queueRequests == 1
+                  ? '2026-09-21T08:00:00Z'
+                  : '2026-09-21T08:01:00Z',
+              items: [
+                item(
+                  1,
+                  queueRequests == 1 ? 'initial' : 'refreshed',
+                  queueRequests == 1 ? 'Initial Track' : 'Refreshed Track',
+                ),
+              ],
+            ),
+          );
+        }
+        roomRequests++;
+        return apiResponse(
+          room(roomAId, roomRequests == 1 ? 'Initial Room' : 'Refreshed Room'),
+        );
+      });
+      addTearDown(harness.dispose);
+      const key = RoomSessionKey(roomId: roomAId, token: 'token-a');
+      final subscription = listenToRoom(harness.container, key);
+      addTearDown(subscription.close);
+      await flushEvents();
+
+      final controller = harness.container.read(
+        roomControllerProvider(key).notifier,
+      );
+      await controller.refresh();
+
+      final state = harness.container.read(roomControllerProvider(key));
+      expect(state.room!.name, 'Refreshed Room');
+      expect(state.queue!.items.single.track.title, 'Refreshed Track');
+      expect(roomRequests, 2);
+      expect(queueRequests, 2);
+      expect(harness.sockets.requests, hasLength(1));
+    },
+  );
+
+  test(
     'unexpected disconnect reconnects once and waits for sync_required',
     () async {
       var queueRequests = 0;

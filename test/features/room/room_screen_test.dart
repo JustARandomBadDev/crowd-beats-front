@@ -125,10 +125,20 @@ http.Response joinedRoomB() => apiResponse({
   'ws': {'url': '/ws?room_id=$roomBId'},
 });
 
-Widget appFor(RoomHarness harness, Widget home) => UncontrolledProviderScope(
-  container: harness.container,
-  child: MaterialApp(theme: AppTheme.dark, home: home),
-);
+Widget appFor(RoomHarness harness, Widget home, {double textScaleFactor = 1}) =>
+    UncontrolledProviderScope(
+      container: harness.container,
+      child: MaterialApp(
+        theme: AppTheme.dark,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(textScaleFactor)),
+          child: child!,
+        ),
+        home: home,
+      ),
+    );
 
 Future<void> disposeHarness(WidgetTester tester, RoomHarness harness) async {
   await tester.pumpWidget(const SizedBox.shrink());
@@ -177,7 +187,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Room A'), findsWidgets);
-    expect(find.text('Now playing'), findsOneWidget);
+    expect(find.text('NOW PLAYING'), findsOneWidget);
     expect(find.text('Currently Playing'), findsOneWidget);
     expect(find.text('First Track'), findsOneWidget);
     expect(find.text('Second Track'), findsOneWidget);
@@ -233,6 +243,66 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(TrackSearchScreen), findsOneWidget);
     await disposeHarness(tester, harness);
+  });
+
+  testWidgets('Room layout supports representative phone widths', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    for (final width in [320.0, 390.0, 430.0]) {
+      tester.view.physicalSize = Size(width, 900);
+      final harness = RoomHarness((request) async {
+        switch (request.url.path) {
+          case '/api/v1/sessions/me':
+            return currentSession(roomAId);
+          case '/api/v1/rooms/$roomAId':
+            return apiResponse(
+              room(roomAId, 'A Room With A Longer Display Name'),
+            );
+          case '/api/v1/rooms/$roomAId/queue':
+            return apiResponse(
+              queue(
+                nowPlaying: {
+                  'room_track_id': 'playing-id',
+                  'vote_count': 7,
+                  'track': track(
+                    'playing',
+                    'A Long Currently Playing Track Title',
+                  ),
+                  'proposed_by': 'Sam',
+                },
+                items: [queuedTrack(1, 'first', 'A Long Queued Track Title')],
+              ),
+            );
+          default:
+            throw StateError('Unexpected request ${request.url.path}');
+        }
+      });
+      await harness.bootstrap();
+
+      await tester.pumpWidget(
+        appFor(
+          harness,
+          const RoomScreen(),
+          textScaleFactor: width == 320 ? 1.3 : 1,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final layoutException = tester.takeException();
+      expect(layoutException, isNull, reason: 'width $width');
+      expect(find.text('Search music'), findsOneWidget);
+      expect(
+        find.byTooltip('Vote for A Long Queued Track Title'),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      harness.dispose();
+    }
   });
 
   testWidgets('reconnect warning keeps the last queue visible', (tester) async {

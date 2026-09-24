@@ -38,7 +38,13 @@ class RoomScreen extends ConsumerWidget {
               color: AppColors.purpleLight,
             ),
             SizedBox(width: AppSpacing.small),
-            Text('CrowdBeats'),
+            Flexible(
+              child: Text(
+                'CrowdBeats',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         actions: [

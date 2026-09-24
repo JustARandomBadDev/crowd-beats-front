@@ -4,6 +4,7 @@ import 'package:crowd_beats_front/core/api/api_client.dart';
 import 'package:crowd_beats_front/core/api/crowd_beats_api.dart';
 import 'package:crowd_beats_front/core/config/app_providers.dart';
 import 'package:crowd_beats_front/core/storage/session_storage.dart';
+import 'package:crowd_beats_front/core/theme/app_theme.dart';
 import 'package:crowd_beats_front/features/session/join_screen.dart';
 import 'package:crowd_beats_front/features/session/session_controller.dart';
 import 'package:flutter/material.dart';
@@ -180,6 +181,10 @@ void main() {
   });
 
   testWidgets('Join screen displays backend QR error', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 800);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
     final h = Harness(
       MemorySessionStorage(),
       (_) async => apiError('INVALID_QR_CODE', status: 403),
@@ -190,9 +195,21 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: h.container,
-        child: const MaterialApp(home: JoinScreen()),
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: const TextScaler.linear(1.3),
+              viewInsets: const EdgeInsets.only(bottom: 240),
+            ),
+            child: child!,
+          ),
+          home: const JoinScreen(),
+        ),
       ),
     );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     expect(
       find.text('This QR code is invalid or expired. Scan a new code.'),
       findsOneWidget,

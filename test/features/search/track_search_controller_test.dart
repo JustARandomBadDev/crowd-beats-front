@@ -425,6 +425,10 @@ void main() {
   testWidgets('search screen renders results and a valid empty state', (
     tester,
   ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 800);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
     final harness = SearchHarness((request) async {
       if (request.url.path == '/api/v1/sessions/me') {
         return currentSession(roomAId);
@@ -442,6 +446,13 @@ void main() {
         container: harness.container,
         child: MaterialApp(
           theme: AppTheme.dark,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: const TextScaler.linear(1.3),
+              viewInsets: const EdgeInsets.only(bottom: 240),
+            ),
+            child: child!,
+          ),
           home: const TrackSearchScreen(session: sessionA),
         ),
       ),
@@ -449,12 +460,14 @@ void main() {
     await tester.enterText(find.byType(TextField), 'house');
     await tester.tap(find.byTooltip('Search'));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     expect(find.text('A very long result title'), findsOneWidget);
     expect(find.byTooltip('Propose A very long result title'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'empty');
     await tester.tap(find.byTooltip('Search'));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     expect(find.text('No tracks found'), findsOneWidget);
     expect(find.text('Try another title, artist, or album.'), findsOneWidget);
 
